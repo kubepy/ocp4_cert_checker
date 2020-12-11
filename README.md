@@ -7,5 +7,5 @@ oc debug --image registry.redhat.io/rhel8/support-tools  node/master-0.ocp4.exam
 oc -n openshift-monitoring create secret generic openssl-bin --from-file=openssl=/tmp/openssl
 ```
 ```
-oc create -f cert_checker.yaml
+oc -n openshift-monitoring create -f cert_checker.yaml
 ```
