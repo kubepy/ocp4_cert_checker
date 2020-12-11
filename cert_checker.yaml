@@ -1,0 +1,70 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: cert-checker
+  namespace: openshift-monitoring
+spec:
+  jobTemplate:
+    metadata:
+      name: cert-checker
+    spec:
+      template:
+        spec:
+          containers:
+          - volumeMounts:
+            - mountPath: /tmp/openssl
+              name: openssl-bin
+              subPath: openssl
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              set -euo pipefail
+              export ALERTDAY=60
+              cd /tmp
+              oc -n openshift-kube-apiserver-operator get cm kube-apiserver-to-kubelet-client-ca -o jsonpath='{.data.ca-bundle\.crt}' > ca-bundle.crt
+              csplit -f cert- ca-bundle.crt '/-----BEGIN CERTIFICATE-----/' '{*}'
+              for cert in `ls cert-{01..99} 2> /dev/null` ; do
+              CERTDATE=$(/tmp/openssl x509 -dates -noout -in $cert | grep notAfter)
+              CERTDATE=${CERTDATE/notAfter=/}
+              CERTEXP=$(date --date="$CERTDATE" --utc +"%Y-%m-%d")
+              DATE=$(date --iso-8601)
+              DAYS=$(( ($(date -d ${CERTEXP} +%s) - $(date -d ${DATE} +%s)) / 86400 ))
+              [[ ${DAYS} -gt 0 && ${DAYS} -lt ${ALERTDAY} ]] && cat <<EOF | oc create -f - || true
+              apiVersion: monitoring.coreos.com/v1
+              kind: PrometheusRule
+              metadata:
+                name: kubelet-signer-alert-$CERTEXP
+                namespace: openshift-monitoring
+              spec:
+                groups:
+                - name: kube-apiserver-to-kubelet-signer-$CERTEXP
+                  rules:
+                  - alert: KubeClientCertificateExpirationCustom-$CERTEXP
+                    annotations:
+                      message: kube-apiserver-to-kubelet-signer certificate is expiring in less than $ALERTDAY days ($CERTDATE).
+                    expr: |
+                      vector(1)
+                    labels:
+                      severity: warning
+              EOF
+              done
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            imagePullPolicy: Always
+            name: cert-checker
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: OnFailure
+          volumes:
+          - name: openssl-bin
+            secret:
+              secretName: openssl-bin
+              defaultMode: 0777
+          serviceAccount: prometheus-operator
+          serviceAccountName: prometheus-operator
+          terminationGracePeriodSeconds: 30
+  schedule: '0 2 * * 1'
+  suspend: false
+status: {}
