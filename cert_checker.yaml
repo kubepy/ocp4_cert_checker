@@ -21,13 +21,15 @@ spec:
             - |
               #!/bin/bash
               set -euo pipefail
-              export ALERTDAY=60
+              export ALERTDAY=100
               cd /tmp
               oc -n openshift-kube-apiserver-operator get cm kube-apiserver-to-kubelet-client-ca -o jsonpath='{.data.ca-bundle\.crt}' > ca-bundle.crt
               csplit -f cert- ca-bundle.crt '/-----BEGIN CERTIFICATE-----/' '{*}'
               for cert in `ls cert-{01..99} 2> /dev/null` ; do
               CERTDATE=$(/tmp/openssl x509 -dates -noout -in $cert | grep notAfter)
               CERTDATE=${CERTDATE/notAfter=/}
+              CERTDATE=$(date --date="$CERTDATE")
+              CERTROT=$(date --date="$CERTDATE 73 days ago")
               CERTEXP=$(date --date="$CERTDATE" --utc +"%Y-%m-%d")
               DATE=$(date --iso-8601)
               DAYS=$(( ($(date -d ${CERTEXP} +%s) - $(date -d ${DATE} +%s)) / 86400 ))
@@ -43,7 +45,7 @@ spec:
                   rules:
                   - alert: KubeClientCertificateExpirationCustom-$CERTEXP
                     annotations:
-                      message: kube-apiserver-to-kubelet-signer certificate is expiring in less than $ALERTDAY days ($CERTDATE).
+                      message: kube-apiserver-to-kubelet-signer certificate is expiring in less than $ALERTDAY days (292day is $CERTROT) (365day is $CERTDATE).
                     expr: |
                       vector(1)
                     labels:
